@@ -1,0 +1,101 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "GVT: run loop",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gvt_checker",
+            "args": [
+                "--config",
+                "${workspaceFolder}/config.yaml",
+                "run"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "GVT: once (dry-run)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gvt_checker",
+            "args": [
+                "--config",
+                "${workspaceFolder}/config.yaml",
+                "--log-level",
+                "DEBUG",
+                "once",
+                "--dry-run"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "GVT: once (real notify)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gvt_checker",
+            "args": [
+                "--config",
+                "${workspaceFolder}/config.yaml",
+                "once"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "GVT: ad-hoc search",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gvt_checker",
+            "args": [
+                "search",
+                "${input:keyword}",
+                "--limit",
+                "10"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "GVT: test notification",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gvt_checker",
+            "args": [
+                "--config",
+                "${workspaceFolder}/config.yaml",
+                "test-notify"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "GVT: check config",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "gvt_checker",
+            "args": [
+                "--config",
+                "${workspaceFolder}/config.yaml",
+                "check-config"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ],
+    "inputs": [
+        {
+            "id": "keyword",
+            "type": "promptString",
+            "description": "Search keyword for gebrauchte-veranstaltungstechnik.de",
+            "default": "moving head"
+        }
+    ]
+}

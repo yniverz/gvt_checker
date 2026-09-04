@@ -1,0 +1,77 @@
+# gvt-checker configuration
+# Copy to config.yaml and adjust. ${VAR} / ${VAR:-default} are expanded from
+# environment variables, so secrets stay out of this file (Portainer stack env).
+
+interval_seconds: 900        # check every 15 min
+jitter_seconds: 60           # random extra delay so requests are not perfectly periodic
+delay_between_watches: 3     # be polite between searches
+request_timeout: 30
+state_file: ${GVT_STATE_FILE:-state.json}
+log_level: ${GVT_LOG_LEVEL:-INFO}
+
+# Send one test message through `test_notifiers` on every start. Handy to verify
+# SMTP/Telegram credentials in Portainer without waiting for a real hit.
+test_on_startup: ${GVT_TEST_ON_STARTUP:-false}
+test_notifiers: ${GVT_TEST_NOTIFIERS:-log}
+
+notifiers:
+  log:
+    type: console
+
+  # Set TELEGRAM_ENABLED=true (plus token + chat id) to switch this on.
+  telegram:
+    type: telegram
+    enabled: ${TELEGRAM_ENABLED:-false}
+    token: ${TELEGRAM_BOT_TOKEN:-}
+    chat_id: ${TELEGRAM_CHAT_ID:-}
+    max_per_run: 20          # remaining hits are summarised in one extra message
+
+  discord:
+    type: webhook
+    enabled: ${WEBHOOK_ENABLED:-false}
+    url: ${WEBHOOK_URL:-https://example.invalid/hook}
+    headers:
+      Content-Type: application/json
+
+  mail:
+    type: email
+    enabled: ${SMTP_ENABLED:-false}
+    host: ${SMTP_HOST:-smtp.example.com}
+    port: 587
+    security: starttls       # starttls | ssl | none
+    username: ${SMTP_USER:-}
+    password: ${SMTP_PASSWORD:-}
+    sender: ${SMTP_FROM:-gvt-checker@example.com}
+    to: ${SMTP_TO:-me@example.com}
+
+# Notifiers used by watches that do not list their own.
+# Disabled ones are skipped automatically.
+default_notifiers: [log, telegram]
+
+watches:
+  - name: Moving Heads
+    keyword: moving head           # sent to the site's search box
+    order: dDESC                   # rel | dDESC | dASC | pDESC | pASC | distASC
+    notify_on_first_run: false     # true = also alert about everything already online
+    filter:
+      include_words: [robe, martin, clay paky]
+      include_mode: any            # any | all
+      exclude_words: [defekt, bastler, ersatzteil]
+      max_price: 2500
+      allow_missing_price: true    # keep ads with "Preis auf Anfrage"
+
+  - name: Digitalpulte
+    keyword: mischpult
+    notifiers: [telegram]
+    filter:
+      regex: "(behringer\\s*x32|midas\\s*m32|allen\\s*&?\\s*heath)"
+      exclude_words: [analog, kabel]
+      min_price: 200
+      max_price: 3000
+
+  - name: Case Schnaeppchen
+    keyword: case
+    enabled: false
+    filter:
+      include_words: [flightcase]
+      max_price: 100

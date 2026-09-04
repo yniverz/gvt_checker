@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+config.yaml
+state.json
+*.log
+.env
+.DS_Store
+README.md

@@ -1,0 +1,38 @@
+services:
+  gvt-checker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gvt-checker:latest
+    container_name: gvt-checker
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+      GVT_LOG_LEVEL: ${GVT_LOG_LEVEL:-INFO}
+      GVT_TEST_ON_STARTUP: ${GVT_TEST_ON_STARTUP:-false}
+      GVT_TEST_NOTIFIERS: ${GVT_TEST_NOTIFIERS:-log}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      WEBHOOK_ENABLED: ${WEBHOOK_ENABLED:-false}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      SMTP_ENABLED: ${SMTP_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TO: ${SMTP_TO:-}
+      # Optional: paste the whole config.yaml here instead of using a volume.
+      GVT_CONFIG_YAML: ${GVT_CONFIG_YAML:-}
+    volumes:
+      - gvt-config:/config
+      - gvt-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  gvt-config:
+  gvt-data:
