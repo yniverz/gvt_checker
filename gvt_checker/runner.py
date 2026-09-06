@@ -18,6 +18,7 @@ from .state import SeenStore
 log = logging.getLogger(__name__)
 
 TEST_WATCH_NAME = "Selbsttest"
+ERROR_WATCH_NAME = "Fehler"
 
 
 def _test_listing() -> Listing:
@@ -39,6 +40,22 @@ def _test_listing() -> Listing:
     )
 
 
+def _error_listing(context: str, exc: BaseException) -> Listing:
+    """Synthetic listing used to push a failure through the notifier channels."""
+    return Listing(
+        ad_id="error",
+        title=f"gvt-checker Fehler: {context}",
+        url=f"{BASE_URL}/",
+        description=f"{type(exc).__name__}: {exc}",
+        price=None,
+        price_text="-",
+        posted=date.today(),
+        location="-",
+        image_url=None,
+        commercial=False,
+    )
+
+
 class Runner:
     def __init__(self, config: AppConfig, dry_run: bool = False) -> None:
         self.config = config
@@ -46,6 +63,8 @@ class Runner:
         self.client = GvtClient(timeout=config.request_timeout)
         self.store = SeenStore(config.state_file)
         self._stop = threading.Event()
+        self._last_error_key: str | None = None
+        self._error_seen = False
 
     def request_stop(self) -> None:
         self._stop.set()
@@ -73,6 +92,28 @@ class Runner:
                 ok = False
                 log.exception("notifier %r crashed for watch %r", name, watch.name)
         return ok
+
+    def notify_error(self, context: str, exc: BaseException) -> None:
+        """Push a failure through the error notifiers, once per distinct problem.
+
+        Repeats of the same error are suppressed until a cycle succeeds again,
+        so a permanent fault (read-only state file, site down) does not spam.
+        """
+        key = f"{context}|{type(exc).__name__}|{exc}"
+        self._error_seen = True
+        if key == self._last_error_key:
+            return
+        self._last_error_key = key
+
+        targets = self.config.error_notifier_names
+        if not targets or self.dry_run:
+            return
+        listing = _error_listing(context, exc)
+        for name in targets:
+            try:
+                self.config.notifiers[name].send(ERROR_WATCH_NAME, [listing])
+            except Exception:  # noqa: BLE001 - never fail while reporting a failure
+                log.exception("error notification via %r failed", name)
 
     def send_startup_test(self, force: bool = False) -> bool:
         """Send one test message through the configured test notifiers.
@@ -109,6 +150,7 @@ class Runner:
             listings = self.client.search(watch.keyword, order=watch.order)
         except ScrapeError as exc:
             log.error("watch %r: %s", watch.name, exc)
+            self.notify_error(f"watch {watch.name!r}", exc)
             return []
 
         matched = watch.listing_filter.apply(listings)
@@ -171,10 +213,14 @@ class Runner:
         )
         while not self._stop.is_set():
             started = time.monotonic()
+            self._error_seen = False
             try:
                 self.run_once()
-            except Exception:  # noqa: BLE001 - keep the daemon alive
+            except Exception as exc:  # noqa: BLE001 - keep the daemon alive
                 log.exception("unexpected error during check cycle")
+                self.notify_error("Check-Durchlauf", exc)
+            if not self._error_seen:
+                self._last_error_key = None
             elapsed = time.monotonic() - started
             sleep_for = max(5.0, interval - elapsed)
             if self.config.jitter_seconds > 0:

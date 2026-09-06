@@ -48,6 +48,11 @@ notifiers:
 # Disabled ones are skipped automatically.
 default_notifiers: [log, telegram]
 
+# Where failures (site unreachable, unwritable state file, ...) are reported.
+# Defaults to default_notifiers; repeats of the same error are suppressed until
+# a check cycle succeeds again.
+error_notifiers: ${GVT_ERROR_NOTIFIERS:-log,telegram}
+
 watches:
   - name: Moving Heads
     keyword: moving head           # sent to the site's search box

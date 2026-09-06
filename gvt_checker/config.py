@@ -82,6 +82,7 @@ class AppConfig:
     default_notifier_names: list[str] = field(default_factory=list)
     test_on_startup: bool = False
     test_notifier_names: list[str] = field(default_factory=list)
+    error_notifier_names: list[str] = field(default_factory=list)
 
     def close(self) -> None:
         for notifier in self.notifiers.values():
@@ -210,6 +211,17 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
         )
     test_targets = [t for t in test_targets if t in notifiers]
 
+    error_targets = raw.get("error_notifiers") or defaults
+    if isinstance(error_targets, str):
+        error_targets = [part.strip() for part in error_targets.split(",") if part.strip()]
+    error_targets = [str(t) for t in error_targets]
+    unknown_error = [t for t in error_targets if t not in defined]
+    if unknown_error:
+        raise ConfigError(
+            f"error_notifiers references undefined notifier(s): {', '.join(unknown_error)}"
+        )
+    error_targets = [t for t in error_targets if t in notifiers]
+
     return AppConfig(
         watches=watches,
         notifiers=notifiers,
@@ -222,4 +234,5 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
         default_notifier_names=defaults,
         test_on_startup=_as_bool(raw.get("test_on_startup"), default=False),
         test_notifier_names=test_targets,
+        error_notifier_names=error_targets,
     )

@@ -52,13 +52,55 @@ class SeenStore:
         entry["last_run"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._write(self.path)
+        except OSError as exc:
+            fallback = self._fallback_path()
+            if fallback is None:
+                raise
+            log.error(
+                "cannot write state to %s (%s) - falling back to %s; "
+                "point state_file/GVT_STATE_FILE at a writable directory",
+                self.path,
+                exc,
+                fallback,
+            )
+            self._write(fallback)
+            self.path = fallback
+
+    def _write(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         # Atomic write so a crash mid-save cannot corrupt the state file.
-        fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".state-", suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".state-", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(self._data, handle, indent=2, ensure_ascii=False)
-            os.replace(tmp, self.path)
+            os.replace(tmp, path)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
+
+    def _fallback_path(self) -> Path | None:
+        """Writable location to use when the configured path is not writable."""
+        candidates: list[Path] = []
+        # systemd StateDirectory= first, then XDG, then tmp as a last resort.
+        state_dir = os.environ.get("STATE_DIRECTORY")
+        if state_dir:
+            # STATE_DIRECTORY may be a colon separated list.
+            candidates.append(Path(state_dir.split(":")[0]))
+        xdg_state = os.environ.get("XDG_STATE_HOME")
+        if xdg_state:
+            candidates.append(Path(xdg_state, "gvt-checker"))
+        candidates.append(Path(tempfile.gettempdir(), "gvt-checker"))
+
+        for directory in candidates:
+            candidate = directory / self.path.name
+            if candidate == self.path:
+                continue
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                continue
+            if os.access(directory, os.W_OK):
+                return candidate
+        return None
