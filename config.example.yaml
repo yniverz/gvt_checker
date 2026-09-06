@@ -24,6 +24,7 @@ notifiers:
     enabled: ${TELEGRAM_ENABLED:-false}
     token: ${TELEGRAM_BOT_TOKEN:-}
     chat_id: ${TELEGRAM_CHAT_ID:-}
+    disable_preview: true    # no link preview cards under the messages
     max_per_run: 20          # remaining hits are summarised in one extra message
 
   discord:
