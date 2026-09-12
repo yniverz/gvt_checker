@@ -9,13 +9,13 @@ from urllib.parse import urlparse
 import requests
 
 from ..models import Listing
-from .base import Notifier, NotifyError, format_listing
+from .base import EVENT_NEW, Notifier, NotifyError, format_listing
 
 log = logging.getLogger(__name__)
 
 
 class WebhookNotifier(Notifier):
-    """POSTs ``{"watch": ..., "count": ..., "text": ..., "listings": [...]}``."""
+    """POSTs ``{"watch": ..., "event": ..., "count": ..., "text": ..., "listings": [...]}``."""
 
     name = "webhook"
 
@@ -37,20 +37,21 @@ class WebhookNotifier(Notifier):
         self.verify_tls = verify_tls
         self.session = requests.Session()
 
-    def _payload(self, watch_name: str, listings: list[Listing]) -> dict[str, Any]:
+    def _payload(self, watch_name: str, listings: list[Listing], event: str) -> dict[str, Any]:
         return {
             "watch": watch_name,
+            "event": event,
             "count": len(listings),
             "text": "\n\n".join(format_listing(listing) for listing in listings),
             "listings": [listing.to_dict() for listing in listings],
         }
 
-    def send(self, watch_name: str, listings: list[Listing]) -> None:
+    def send(self, watch_name: str, listings: list[Listing], event: str = EVENT_NEW) -> None:
         try:
             response = self.session.request(
                 self.method,
                 self.url,
-                json=self._payload(watch_name, listings),
+                json=self._payload(watch_name, listings, event),
                 headers=self.headers,
                 timeout=self.timeout,
                 verify=self.verify_tls,

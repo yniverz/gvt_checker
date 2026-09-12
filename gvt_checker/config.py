@@ -66,6 +66,7 @@ class Watch:
     notifier_names: list[str]
     order: str = "dDESC"
     notify_on_first_run: bool = False
+    notify_on_disappear: bool = False
     enabled: bool = True
 
 
@@ -195,6 +196,7 @@ def load_config(path: str | os.PathLike[str]) -> AppConfig:
                 notifier_names=targets,
                 order=order,
                 notify_on_first_run=_as_bool(entry.get("notify_on_first_run"), default=False),
+                notify_on_disappear=_as_bool(entry.get("notify_on_disappear"), default=False),
                 enabled=_as_bool(entry.get("enabled")),
             )
         )

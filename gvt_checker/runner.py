@@ -12,6 +12,7 @@ from datetime import date
 from .config import AppConfig, Watch
 from .models import Listing
 from .notifiers import NotifyError
+from .notifiers.base import EVENT_GONE, EVENT_NEW
 from .scraper import BASE_URL, GvtClient, ScrapeError
 from .state import SeenStore
 
@@ -78,13 +79,13 @@ class Runner:
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, handler)
 
-    def _notify(self, watch: Watch, listings: list[Listing]) -> bool:
+    def _notify(self, watch: Watch, listings: list[Listing], event: str = EVENT_NEW) -> bool:
         """Dispatch to every notifier of the watch. Returns True if all succeeded."""
         ok = True
         for name in watch.notifier_names:
             notifier = self.config.notifiers[name]
             try:
-                notifier.send(watch.name, listings)
+                notifier.send(watch.name, listings, event)
             except NotifyError as exc:
                 ok = False
                 log.error("notifier %r failed for watch %r: %s", name, watch.name, exc)
@@ -145,7 +146,7 @@ class Runner:
         return ok
 
     def check_watch(self, watch: Watch) -> list[Listing]:
-        """Run one watch once and return the newly discovered listings."""
+        """Run one watch once and return the listings it reported (new + gone)."""
         try:
             listings = self.client.search(watch.keyword, order=watch.order)
         except ScrapeError as exc:
@@ -167,20 +168,22 @@ class Runner:
             " (first run)" if first_run else "",
         )
 
+        gone = self._check_disappeared(watch, listings, matched)
+
         if not new:
             self.store.mark_seen(watch.name, [])
-            return []
+            return gone
 
         if first_run and not watch.notify_on_first_run:
             log.info(
                 "watch %r: seeding state with %d listing(s), not notifying", watch.name, len(new)
             )
             self.store.mark_seen(watch.name, [listing.ad_id for listing in new])
-            return new
+            return new + gone
 
         if self.dry_run:
             log.info("dry-run: would notify about %d listing(s) for %r", len(new), watch.name)
-            return new
+            return new + gone
 
         # Only remember ads whose notification actually went out, so a transient
         # Telegram/SMTP outage does not silently swallow a hit.
@@ -188,7 +191,58 @@ class Runner:
             self.store.mark_seen(watch.name, [listing.ad_id for listing in new])
         else:
             log.warning("watch %r: keeping %d listing(s) unseen for retry", watch.name, len(new))
-        return new
+        return new + gone
+
+    def _check_disappeared(
+        self, watch: Watch, listings: list[Listing], matched: list[Listing]
+    ) -> list[Listing]:
+        """Report tracked ads that are no longer in the search results.
+
+        Only active when the watch sets ``notify_on_disappear``. The comparison
+        uses the *unfiltered* result set: an ad that merely stopped matching the
+        filter (e.g. its price changed) is still online and must not be reported.
+        """
+        if not watch.notify_on_disappear:
+            self.store.untrack_active(watch.name)
+            return []
+
+        tracked = self.store.active_listings(watch.name)
+        gone: list[Listing] = []
+        if tracked and not listings:
+            # An empty result page is far more likely a hiccup than "everything sold".
+            log.warning(
+                "watch %r: search returned nothing - skipping disappearance check", watch.name
+            )
+        elif tracked:
+            online = {listing.ad_id for listing in listings}
+            gone = [
+                listing for ad_id, listing in tracked.items() if ad_id not in online
+            ]
+
+        # Refresh the snapshots of everything that is still online and matching.
+        # Vanished ads stay in the store until their notification went through.
+        if not self.dry_run:
+            self.store.track_active(watch.name, matched)
+
+        if not gone:
+            return []
+
+        log.info("watch %r: %d listing(s) disappeared", watch.name, len(gone))
+        if self.dry_run:
+            log.info(
+                "dry-run: would notify about %d disappeared listing(s) for %r",
+                len(gone),
+                watch.name,
+            )
+            return gone
+
+        if self._notify(watch, gone, EVENT_GONE):
+            self.store.forget_active(watch.name, [listing.ad_id for listing in gone])
+        else:
+            log.warning(
+                "watch %r: keeping %d disappeared listing(s) for retry", watch.name, len(gone)
+            )
+        return gone
 
     def run_once(self) -> int:
         total = 0

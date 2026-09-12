@@ -6,9 +6,12 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .models import Listing
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +53,47 @@ class SeenStore:
         seen.extend(ad_id for ad_id in ad_ids if ad_id not in known)
         entry["seen"] = seen[-max_entries:]
         entry["last_run"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def active_listings(self, watch: str) -> dict[str, Listing]:
+        """Snapshots of the listings that were online during the last check."""
+        raw = self._watch(watch).get("active")
+        if not isinstance(raw, dict):
+            return {}
+        result: dict[str, Listing] = {}
+        for ad_id, data in raw.items():
+            if not isinstance(data, dict):
+                continue
+            listing = Listing.from_dict(data)
+            if listing is not None:
+                result[str(ad_id)] = listing
+        return result
+
+    def track_active(self, watch: str, listings: list[Listing], max_entries: int = 2000) -> None:
+        """Store/refresh the snapshots of listings that are currently online."""
+        entry = self._watch(watch)
+        active = entry.get("active")
+        if not isinstance(active, dict):
+            active = {}
+        for listing in listings:
+            # Re-insert so dict order stays "oldest first" for the trim below.
+            active.pop(listing.ad_id, None)
+            active[listing.ad_id] = listing.to_dict()
+        overflow = len(active) - max_entries
+        for ad_id in list(active)[:overflow] if overflow > 0 else []:
+            del active[ad_id]
+        entry["active"] = active
+
+    def forget_active(self, watch: str, ad_ids: Iterable[str]) -> None:
+        """Drop snapshots of listings whose disappearance has been reported."""
+        active = self._watch(watch).get("active")
+        if not isinstance(active, dict):
+            return
+        for ad_id in ad_ids:
+            active.pop(ad_id, None)
+
+    def untrack_active(self, watch: str) -> None:
+        """Forget all snapshots, e.g. when the watch stops tracking disappearances."""
+        self._watch(watch).pop("active", None)
 
     def save(self) -> None:
         try:

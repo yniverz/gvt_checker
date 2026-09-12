@@ -9,7 +9,7 @@ import time
 import requests
 
 from ..models import Listing
-from .base import Notifier, NotifyError
+from .base import EVENT_NEW, Notifier, NotifyError
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ MAX_MESSAGE_LEN = 4000
 
 
 class TelegramNotifier(Notifier):
-    """Sends one HTML formatted message per new listing.
+    """Sends one HTML formatted message per listing.
 
     ``token`` and ``chat_id`` are normally injected from environment variables
     via ``${TELEGRAM_BOT_TOKEN}`` placeholders in the config file.
@@ -43,14 +43,21 @@ class TelegramNotifier(Notifier):
         self.max_per_run = max_per_run
         self.session = requests.Session()
 
-    def _format(self, watch_name: str, listing: Listing) -> str:
+    def _format(self, watch_name: str, listing: Listing, event: str) -> str:
         esc = html.escape
         price = esc(listing.price_text or "kein Preis")
         posted = listing.posted.strftime("%d.%m.%Y") if listing.posted else "?"
         seller = "gewerblich" if listing.commercial else "privat"
         snippet = esc(listing.description)[:400]
+        if event == EVENT_NEW:
+            head = f"\U0001f50e <b>{esc(watch_name)}</b>"
+        else:
+            head = (
+                f"\u274c <b>{esc(watch_name)}</b> \u2013 verschwunden "
+                f"(verkauft oder offline)"
+            )
         text = (
-            f"\U0001f50e <b>{esc(watch_name)}</b>\n"
+            f"{head}\n"
             f"<a href=\"{esc(listing.url)}\">{esc(listing.title)}</a>\n"
             f"\U0001f4b6 <b>{price}</b> \u00b7 \U0001f4c5 {posted}\n"
             f"\U0001f4cd {esc(listing.location or '?')} \u00b7 {seller}"
@@ -76,14 +83,16 @@ class TelegramNotifier(Notifier):
             # Never echo the token; response bodies from Telegram do not contain it.
             raise NotifyError(f"telegram API returned {response.status_code}: {response.text[:300]}")
 
-    def send(self, watch_name: str, listings: list[Listing]) -> None:
+    def send(self, watch_name: str, listings: list[Listing], event: str = EVENT_NEW) -> None:
         batch = listings[: self.max_per_run]
         for index, listing in enumerate(batch):
-            self._post(self._format(watch_name, listing))
+            self._post(self._format(watch_name, listing, event))
             if index + 1 < len(batch):
                 time.sleep(1.0)  # stay below Telegram's ~30 msg/s limit
         if len(listings) > len(batch):
-            self._post(f"\u2026 und {len(listings) - len(batch)} weitere Treffer f\u00fcr {html.escape(watch_name)}.")
+            rest = len(listings) - len(batch)
+            kind = "weitere Treffer" if event == EVENT_NEW else "weitere verschwundene Anzeigen"
+            self._post(f"\u2026 und {rest} {kind} f\u00fcr {html.escape(watch_name)}.")
 
     def close(self) -> None:
         self.session.close()

@@ -59,6 +59,7 @@ watches:
     keyword: moving head           # sent to the site's search box
     order: dDESC                   # rel | dDESC | dASC | pDESC | pASC | distASC
     notify_on_first_run: false     # true = also alert about everything already online
+    notify_on_disappear: true      # true = also alert when an ad vanishes (verkauft/offline)
     filter:
       include_words: [robe, martin, clay paky]
       include_mode: any            # any | all
