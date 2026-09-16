@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, asdict
 from datetime import date
 from typing import Any
+
+_WS_RE = re.compile(r"\s+")
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,12 @@ class Listing:
     def haystack(self) -> str:
         """Lowercased text used for include/exclude/regex matching."""
         return f"{self.title}\n{self.description}".lower()
+
+    @property
+    def fingerprint(self) -> str:
+        """Identity that survives a re-listing, where the site hands out a new ad id."""
+        parts = (self.title, self.location, self.description[:200])
+        return "|".join(_WS_RE.sub(" ", part).strip().lower() for part in parts)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

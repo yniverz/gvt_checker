@@ -168,22 +168,37 @@ class Runner:
             " (first run)" if first_run else "",
         )
 
-        gone = self._check_disappeared(watch, listings, matched)
+        gone, relisted = self._resolve_disappeared(watch, listings, matched)
+        if relisted:
+            adopted = [listing for listing in new if listing.ad_id in relisted]
+            if adopted:
+                log.info(
+                    "watch %r: %d ad(s) re-listed under a new id, notifying neither new nor gone",
+                    watch.name,
+                    len(adopted),
+                )
+                new = [listing for listing in new if listing.ad_id not in relisted]
+                self.store.mark_seen(watch.name, [listing.ad_id for listing in adopted])
 
+        self._report_new(watch, new, first_run)
+        self._report_disappeared(watch, gone)
+        return new + gone
+
+    def _report_new(self, watch: Watch, new: list[Listing], first_run: bool) -> None:
         if not new:
             self.store.mark_seen(watch.name, [])
-            return gone
+            return
 
         if first_run and not watch.notify_on_first_run:
             log.info(
                 "watch %r: seeding state with %d listing(s), not notifying", watch.name, len(new)
             )
             self.store.mark_seen(watch.name, [listing.ad_id for listing in new])
-            return new + gone
+            return
 
         if self.dry_run:
             log.info("dry-run: would notify about %d listing(s) for %r", len(new), watch.name)
-            return new + gone
+            return
 
         # Only remember ads whose notification actually went out, so a transient
         # Telegram/SMTP outage does not silently swallow a hit.
@@ -191,23 +206,25 @@ class Runner:
             self.store.mark_seen(watch.name, [listing.ad_id for listing in new])
         else:
             log.warning("watch %r: keeping %d listing(s) unseen for retry", watch.name, len(new))
-        return new + gone
 
-    def _check_disappeared(
+    def _resolve_disappeared(
         self, watch: Watch, listings: list[Listing], matched: list[Listing]
-    ) -> list[Listing]:
-        """Report tracked ads that are no longer in the search results.
+    ) -> tuple[list[Listing], set[str]]:
+        """Split the tracked ads that are gone from the ones that only got a new id.
 
         Only active when the watch sets ``notify_on_disappear``. The comparison
         uses the *unfiltered* result set: an ad that merely stopped matching the
         filter (e.g. its price changed) is still online and must not be reported.
+        Returns ``(really gone, ad ids of re-listed copies)``.
         """
         if not watch.notify_on_disappear:
             self.store.untrack_active(watch.name)
-            return []
+            return [], set()
 
         tracked = self.store.active_listings(watch.name)
         gone: list[Listing] = []
+        relisted: set[str] = set()
+        superseded: list[str] = []
         if tracked and not listings:
             # An empty result page is far more likely a hiccup than "everything sold".
             log.warning(
@@ -215,17 +232,30 @@ class Runner:
             )
         elif tracked:
             online = {listing.ad_id for listing in listings}
-            gone = [
-                listing for ad_id, listing in tracked.items() if ad_id not in online
-            ]
+            by_fingerprint = {listing.fingerprint: listing for listing in listings}
+            for ad_id, listing in tracked.items():
+                if ad_id in online:
+                    continue
+                # The site hands out a new ad id when an ad is re-listed; that is
+                # the same ad, not a sale plus a fresh hit.
+                replacement = by_fingerprint.get(listing.fingerprint)
+                if replacement is not None:
+                    relisted.add(replacement.ad_id)
+                    superseded.append(ad_id)
+                    continue
+                gone.append(listing)
 
         # Refresh the snapshots of everything that is still online and matching.
         # Vanished ads stay in the store until their notification went through.
         if not self.dry_run:
             self.store.track_active(watch.name, matched)
+            self.store.forget_active(watch.name, superseded)
 
+        return gone, relisted
+
+    def _report_disappeared(self, watch: Watch, gone: list[Listing]) -> None:
         if not gone:
-            return []
+            return
 
         log.info("watch %r: %d listing(s) disappeared", watch.name, len(gone))
         if self.dry_run:
@@ -234,7 +264,7 @@ class Runner:
                 len(gone),
                 watch.name,
             )
-            return gone
+            return
 
         if self._notify(watch, gone, EVENT_GONE):
             self.store.forget_active(watch.name, [listing.ad_id for listing in gone])
@@ -242,7 +272,6 @@ class Runner:
             log.warning(
                 "watch %r: keeping %d disappeared listing(s) for retry", watch.name, len(gone)
             )
-        return gone
 
     def run_once(self) -> int:
         total = 0
